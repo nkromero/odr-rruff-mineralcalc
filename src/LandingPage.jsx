@@ -3,6 +3,7 @@ import { COLORS, displayFormulaStr } from "./shared.jsx";
 import { SummaryView, SummaryDetail, FormulaHeader } from "./SummaryView.jsx";
 import { analyze, EXAMPLES } from "./MineralFormulaParser.jsx";
 import { loadCitationsForMineral } from "./cellparamsLoader.js";
+import { loadMineralForAmcsdRecord } from "./mineralDataSources.js";
 import { buildIdealRows, buildEmpiricalRows, collapseMatchingRows } from "./empiricalFormulaRows.js";
 
 // The first thing visitors see: the mineral's ideal formula (picked from the
@@ -32,18 +33,41 @@ function getQueryParam(key) {
 }
 
 export default function LandingPage({ onEdit }) {
-  const [name, formulaInput, mineralId] = useMemo(() => {
+  // Links are either ?mineral=…&formula=…&ID=… (ID is the cellparams key
+  // for the citations) or ?UUID=… alone, an AMCSD record that gives both
+  // formulas. The first wins when both are present.
+  const [urlName, urlFormula, urlMineralId, lookupUuid] = useMemo(() => {
     const mineral = getQueryParam("mineral");
     const formula = getQueryParam("formula");
-    // The RRUFF cellparams outer hash key for this mineral (see
-    // scripts/lookup-cellparams.mjs) — used to look up its citation table by
-    // ID instead of by name.
     const id = getQueryParam("ID");
-    if (mineral && formula) return [mineral, formula, id];
-    return [...EXAMPLES[0].split("\t"), null];
+    if (mineral && formula) return [mineral, formula, id, null];
+    const uuid = getQueryParam("UUID");
+    if (uuid) return [null, null, null, uuid];
+    return [...EXAMPLES[0].split("\t"), null, null];
   }, []);
 
+  // `undefined` = not resolved yet, as with `fetched` below.
+  const [lookup, setLookup] = useState(undefined);
+  const [lookupError, setLookupError] = useState(null);
+
+  useEffect(() => {
+    if (!lookupUuid) return;
+    const controller = new AbortController();
+    loadMineralForAmcsdRecord(lookupUuid, { signal: controller.signal })
+      .then(setLookup)
+      .catch((e) => {
+        if (!controller.signal.aborted) setLookupError(e.message);
+      });
+    return () => controller.abort();
+  }, [lookupUuid]);
+
+  const name = lookupUuid ? lookup?.name ?? null : urlName;
+  const formulaInput = lookupUuid ? lookup?.formulaStr ?? null : urlFormula;
+  const mineralId = lookupUuid ? null : urlMineralId;
+  const isLoadingMineral = Boolean(lookupUuid) && lookup === undefined && !lookupError;
+
   const error = useMemo(() => {
+    if (formulaInput === null) return null;
     try {
       analyze(`${name}\t${formulaInput}`);
       return null;
@@ -52,7 +76,10 @@ export default function LandingPage({ onEdit }) {
     }
   }, [name, formulaInput]);
 
-  const idealRows = useMemo(() => (error ? [] : buildIdealRows(name, formulaInput)), [error, name, formulaInput]);
+  const idealRows = useMemo(
+    () => (error || formulaInput === null ? [] : buildIdealRows(name, formulaInput)),
+    [error, name, formulaInput]
+  );
 
   // `fetched`: `undefined` = not resolved yet; `null` = resolved, mineralId
   // has no cellparams records; an object = resolved with data. Both `null`
@@ -79,10 +106,17 @@ export default function LandingPage({ onEdit }) {
     };
   }, [mineralId]);
 
-  const citations = fetched?.citations || [];
+  // A ?UUID= link's only citation is its AMCSD record.
+  const citations = useMemo(
+    () => (lookupUuid ? (lookup?.citation ? [lookup.citation] : []) : fetched?.citations || []),
+    [lookupUuid, lookup, fetched]
+  );
+  // Waits for the ?UUID= lookup, since the ideal formula guides how
+  // citations are read.
   const empiricalRows = useMemo(
-    () => buildEmpiricalRows(fetched?.mineralName, citations, idealRows, formulaInput),
-    [fetched, citations, idealRows, formulaInput]
+    () =>
+      isLoadingMineral ? [] : buildEmpiricalRows(fetched?.mineralName ?? name, citations, idealRows, formulaInput ?? ""),
+    [isLoadingMineral, fetched, citations, idealRows, formulaInput]
   );
   const isLoadingCitations = Boolean(mineralId) && fetched === undefined && !fetchError;
 
@@ -126,12 +160,32 @@ export default function LandingPage({ onEdit }) {
           </h1>
         </div>
 
+        {isLoadingMineral && (
+          <div style={{ marginBottom: 18, fontSize: 14, color: COLORS.text }}>Loading mineral…</div>
+        )}
+        {lookupError && (
+          <div
+            style={{
+              marginBottom: 18,
+              padding: "12px 14px",
+              borderRadius: 8,
+              background: "#fbeee5",
+              border: `1px solid ${COLORS.warn}`,
+              color: COLORS.warn,
+              fontSize: 13.5,
+              fontFamily: COLORS.mono,
+            }}
+          >
+            Couldn't load the mineral for AMCSD record {lookupUuid}: {lookupError}
+          </div>
+        )}
+
         {/* An ideal formula that fails to parse only means there's no ideal
             dataset to lead the table with (idealRows is already empty in
             that case, see above) — it shouldn't block whatever empirical
             rows did come in, so this notice sits above the table rather than
-            replacing it. */}
-        {error && (
+            replacing it. Hidden on a detail view. */}
+        {error && openColumnIndex === null && (
           <div style={{ marginBottom: rows.length > 0 ? 18 : 0 }}>
             <FormulaHeader title={name} formulaStr={formulaInput} />
             <div
@@ -183,7 +237,7 @@ export default function LandingPage({ onEdit }) {
               </label>
             )}
             <SummaryView
-              title={name}
+              title={name ?? fetched?.mineralName}
               formulaStr={displayFormulaStr(displayedRows[0].result)}
               rows={displayedRows}
               onSelect={setOpenColumnIndex}
@@ -205,6 +259,7 @@ export default function LandingPage({ onEdit }) {
           )
         )}
 
+        {formulaInput !== null && (
         <div style={{ marginTop: 28, display: "flex", justifyContent: "flex-end", gap: 12 }}>
           <button
             // From a detail view, start the custom formula off the formula
@@ -229,6 +284,7 @@ export default function LandingPage({ onEdit }) {
             Custom Formula
           </button>
         </div>
+        )}
       </div>
     </div>
   );

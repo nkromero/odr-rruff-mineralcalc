@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import devRecordProxy from "./devRecordProxy.js";
 
 // The WordPress plugin (wordpress-plugin/odr-rruff-mineralcalc/) enqueues
 // whatever it finds at dist/assets/index-*.js|css relative to its own
@@ -8,7 +9,8 @@ import react from "@vitejs/plugin-react";
 // no manual copy step. `base: "./"` keeps every asset URL relative, since
 // the plugin can end up installed under any path on any WordPress site.
 export default defineConfig({
-  plugins: [react()],
+  // Dev only; the plugin has its own PHP proxy.
+  plugins: [react(), devRecordProxy()],
   base: "./",
   build: {
     outDir: "wordpress-plugin/odr-rruff-mineralcalc/dist",

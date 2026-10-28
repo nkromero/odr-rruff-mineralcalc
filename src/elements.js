@@ -4,6 +4,7 @@
 // a count field from the source file; every number after that is a possible
 // valence, with the first one used as the default when a formula doesn't
 // specify one explicitly (e.g. "^2+^").
+// On the page, elementsLoader.js replaces these with the database's values.
 // ---------------------------------------------------------------------------
 export const ELEMENTS = {
   H: { weight: 1.00794, valences: [1] },
