@@ -125,6 +125,23 @@ function hydrogenAddedTitle({ count, idealH, element, elementIdealCount, element
   );
 }
 
+// Hover text for the AMC label valences note (see amcChemistry.js).
+function amcValencesTitle({ usable, labelled, rejected, partial, mismatches, scale }) {
+  const lines = [];
+  if (usable) {
+    lines.push(`Valences read from the AMC file's atom labels: ${labelled.map((l) => `${l.label} (${l.valence}+)`).join(", ")}`);
+  } else {
+    lines.push(
+      "Valence labels found in the AMC file, but the element totals don't match the record's Chemistry field, " +
+        `so the Chemistry formula is used as is: ${mismatches.map((m) => `${m.element} ${m.ours} from the atom table vs ${m.chemistry}`).join(", ")}`
+    );
+  }
+  if (partial.length) lines.push(`Some ${partial.join(", ")} sites have no valence label; that part is still guessed.`);
+  if (rejected.length) lines.push(`Ignored (not a valence of that element): ${rejected.map((l) => l.label).join(", ")}`);
+  if (scale !== 1) lines.push(`The atom table's formula unit is scaled by ${scale} to match the Chemistry field.`);
+  return lines.join("\n");
+}
+
 // Shows the union of elements across a set of formulas as rows, with one
 // percent-of-mass column per formula (labeled (1), (2), ...). A formula
 // missing an element that another has just gets a blank cell rather than a
@@ -433,6 +450,12 @@ export const SummaryView = memo(function SummaryView({ title, formulaStr, rows, 
                 title={hydrogenAddedTitle(r.hydrogenAdded)}
               >
                 , H from ideal formula
+              </span>
+            )}
+            {/* Whether the AMC label valences were used. */}
+            {r.amcValences && (
+              <span style={{ color: COLORS.warn, fontWeight: 600 }} title={amcValencesTitle(r.amcValences)}>
+                {r.amcValences.usable ? ", valences from AMC labels" : ", AMC label valences not used"}
               </span>
             )}
             {/* Elements the ideal formula requires that this citation never

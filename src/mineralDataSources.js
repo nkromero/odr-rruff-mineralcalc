@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { amcValenceChemistry } from "./amcChemistry.js";
 
 // ---------------------------------------------------------------------------
 // Data-source layer: anything that can produce a list of
@@ -89,6 +90,81 @@ export async function loadMineralsFromApi(
       }))
   );
   return normalizeMineralRows(rows);
+}
+
+// The plugin's record proxy, or devRecordProxy.js's under "npm run dev".
+// Read on use so Node scripts without `document` can import this module.
+function recordProxyUrl() {
+  return document.getElementById("mineral-parser-root")?.dataset.recordUrl || "/odr_rruff/api/record/";
+}
+
+// One ODR record: { fields: [{ field_name, value }], records: [children] }.
+export async function loadOdrRecord(uuid, { signal } = {}) {
+  const res = await fetch(recordProxyUrl() + encodeURIComponent(uuid), { signal });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    // WordPress REST errors carry their reason in `message`.
+    throw new Error(json?.message || `Record request failed: ${res.status} ${res.statusText}`);
+  }
+  if (!json) throw new Error("The record response was not valid JSON");
+  return json;
+}
+
+// A field's value, or undefined when missing or empty.
+export function getRecordField(record, fieldName) {
+  const field = record?.fields?.find?.((f) => f.field_name === fieldName);
+  if (!field || field.value === undefined || field.value === null || field.value === "") return undefined;
+  return String(field.value);
+}
+
+// Valences from the AMC atom labels, or { error } if the AMC text can't be read.
+function amcValencesOf(record) {
+  const amcText = getRecordField(record, "AMC File Contents");
+  if (!amcText) return { error: "The record has no AMC File Contents" };
+  try {
+    return amcValenceChemistry(amcText, getRecordField(record, "Chemistry"));
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+// The record as a citation column: its Chemistry (split by label valences
+// when usable), cell and journal line.
+function amcsdCitationOf(record) {
+  const chemistry = getRecordField(record, "Chemistry");
+  if (!chemistry) return null;
+  const amcValences = amcValencesOf(record);
+  const cellField = (name) => parseFloat(getRecordField(record, name));
+  const amcLines = (getRecordField(record, "AMC File Contents") || "").split(/\r?\n/);
+  return {
+    formula: amcValences.usable ? amcValences.formulaStr : chemistry,
+    cell: {
+      a: cellField("a"),
+      b: cellField("b"),
+      c: cellField("c"),
+      alpha: cellField("alpha"),
+      beta: cellField("beta"),
+      gamma: cellField("gamma"),
+    },
+    // AMC line 3 is the journal.
+    citation: (amcLines[2] || getRecordField(record, "Authors") || "").trim(),
+    amcValences: amcValences.labelled?.length ? amcValences : null,
+  };
+}
+
+// A ?UUID= link: the record's IMA mineral child gives the name and ideal
+// formula; the record itself is the citation.
+export async function loadMineralForAmcsdRecord(uuid, options) {
+  const record = await loadOdrRecord(uuid, options);
+  const mineral = (record.records || []).find((child) => getRecordField(child, "Valence Formula"));
+  if (!mineral) throw new Error("The AMCSD record has no linked IMA mineral with a valence formula");
+  const citation = amcsdCitationOf(record);
+  if (!citation) throw new Error("The AMCSD record has no Chemistry field");
+  return {
+    name: getRecordField(mineral, "Mineral Name") || getRecordField(record, "Mineral"),
+    formulaStr: getRecordField(mineral, "Valence Formula"),
+    citation,
+  };
 }
 
 // Registry so the UI can offer a source picker without importing every

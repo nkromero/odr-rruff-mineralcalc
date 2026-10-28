@@ -58,9 +58,11 @@ export function sameComposition(resultA, resultB) {
 // cell parameters and still be reporting the same underlying formula.
 // Between duplicates, the older citation wins (citationYear); a row whose
 // year can't be determined never displaces one that's already kept, since
-// there's no basis to call it "older."
+// there's no basis to call it "older." A row with usable AMC label valences
+// always wins.
 export function dedupeCitationRows(rows) {
   const kept = [];
+  const hasLabelValences = (row) => Boolean(row.amcValences?.usable);
   for (const row of rows) {
     const dupIndex = kept.findIndex((k) => sameComposition(k.result, row.result));
     if (dupIndex === -1) {
@@ -68,6 +70,10 @@ export function dedupeCitationRows(rows) {
       continue;
     }
     const existing = kept[dupIndex];
+    if (hasLabelValences(existing) !== hasLabelValences(row)) {
+      if (hasLabelValences(row)) kept[dupIndex] = row;
+      continue;
+    }
     if (row.year != null && (existing.year == null || row.year < existing.year)) {
       kept[dupIndex] = row;
     }
@@ -222,7 +228,7 @@ export function buildEmpiricalRows(name, citations, idealRows = [], idealFormula
   const requiredElements = requiredElementsOf(idealFormulaStr);
   const idealH = idealHydrogenCount(idealRows, idealFormulaStr);
   const rows = [];
-  for (const { formula, cell, citation } of citations) {
+  for (const { formula, cell, citation, amcValences } of citations) {
     const converted = isFormulaFormatted(formula) ? formula : parseChemicalFormula(formula);
     const reeResult = substituteRee(converted, reeElement);
     const { reeSubstitution } = reeResult;
@@ -261,6 +267,8 @@ export function buildEmpiricalRows(name, citations, idealRows = [], idealFormula
         reeSubstitution,
         hydrogenAdded,
         missingElements: missingElements(requiredElements, formulaStr),
+        // Only set on a ?UUID= link's AMCSD citation.
+        amcValences: amcValences || null,
       };
       // A range citation (e.g. a comma-shared site like
       // '(Mn,Fe,Sr,Ba,Mg,Zr)') splits into its two end-member columns, the
